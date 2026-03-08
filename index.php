@@ -55,7 +55,9 @@ $alpha = isset($_GET['alpha']) ? (float)$_GET['alpha'] : 0.5;
 
 // 1. Simple Average (SA)
 function getSA($data) {
-    return array_sum($data) / count($data);
+    $count = count($data);
+    if ($count == 0) return 0;
+    return array_sum($data) / $count;
 }
 
 // 2. Moving Average (MA)
@@ -81,7 +83,7 @@ $n = count($data);
     $sum = ($data[$n-1] * $w1) + ($data[$n-2] * $w2) + ($data[$n-3] * $w3);
     return $sum / $total_w; // หารเพื่อ Normalize ให้กลับมาเป็นค่าเฉลี่ยที่ถูกต้อง
 }
-    $total_w = $w1 + $w2 + $w3;
+    
 
 // 4. Exponential Smoothing (ES)
 function getES($data, $alpha) {
@@ -96,16 +98,34 @@ function getES($data, $alpha) {
 function forecastFuture($data, $method, $days, $w1, $w2, $w3, $alpha, $n_days) {
     $series = $data;
     $results = [];
-    for ($i = 0; $i < $days; $i++) {
-        $val = 0;
-        switch($method) {
-            case 'SA': $val = getSA($series); break;
-            case 'MA': $val = getMA($series, $n_days); break; // ส่งค่า n_days ที่รับมาจาก User เข้าไปตรงนี้ 
-            case 'ES': $val = getES($series, $alpha); break;
-            default:   $val = getWMA($series, $w1, $w2, $w3); break;
+// คำนวณค่าพยากรณ์ "จุดแรก" ก่อน
+    $firstVal = 0;
+    switch($method) {
+        case 'SA': $firstVal = getSA($series); break;
+        case 'MA': $firstVal = getMA($series, $n_days); break;
+        case 'ES': $firstVal = getES($series, $alpha); break;
+        default:   $firstVal = getWMA($series, $w1, $w2, $w3); break;
+    }
+
+    // สำหรับ SA และ ES ค่าพยากรณ์จะเป็นค่าคงที่ (Static)
+    // ใช้ลูปเติมค่าเดิมได้เลย ไม่ต้องคำนวณใหม่
+    if ($method == 'SA' || $method == 'ES') {
+        $val = round($firstVal);
+        for ($i = 0; $i < $days; $i++) {
+            $results[] = $val;
         }
-        $results[] = round($val);
-        $series[] = $val;
+    } else {
+        // สำหรับ MA และ WMA ค่าจะเปลี่ยนไปตามหน้าต่างข้อมูล (Moving Window) 
+        // จึงยังต้องใช้ Recursive ลูปเดิมที่คุณเขียนไว้ (ซึ่งถูกต้องแล้ว)
+        for ($i = 0; $i < $days; $i++) {
+            $val = 0;
+            switch($method) {
+                case 'MA': $val = getMA($series, $n_days); break;
+                default:   $val = getWMA($series, $w1, $w2, $w3); break;
+            }
+            $results[] = round($val);
+            $series[] = $val; // เติมค่าที่พยากรณ์ได้กลับเข้าไปเพื่อใช้หาจุดถัดไป
+        }
     }
     return $results;
 }
@@ -213,7 +233,9 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
             <div class="col-md-2">
                 <button type="submit" class="btn btn-primary w-100">อัปเดตโมเดล</button>
             </div>
-                <?php if(abs($total_w - 1.0) > 0.0001): ?>
+                <?php 
+                    $total_w = $w1 + $w2 + $w3;
+                    if(abs($total_w - 1.0) > 0.0001): ?>
                     <p style="color: red; text-align: left; margin-top: 5px; font-size: 0.8em;">* คำเตือน: ผลรวมน้ำหนักควรเท่ากับ 1.0 (ปัจจุบันคือ <?= $total_w ?>)</p>
                 <?php endif; ?>
         </form>
