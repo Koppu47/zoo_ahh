@@ -49,10 +49,36 @@ $forecastDays = isset($_GET['f_days']) ? (int)$_GET['f_days'] : 7;
 $w1 = isset($_GET['w1']) ? (float)$_GET['w1'] : 0.5;
 $w2 = isset($_GET['w2']) ? (float)$_GET['w2'] : 0.3;
 $w3 = isset($_GET['w3']) ? (float)$_GET['w3'] : 0.2;
-$alpha = isset($_GET['alpha']) ? (float)$_GET['alpha'] : 0.5;
+// ฟังก์ชันหาค่า Alpha ที่แม่นยำที่สุด (Error ต่ำที่สุด)
+function getBestAlpha($data, $n_days) {
+    $bestAlpha = 0.1;
+    $minMAD = INF;
+
+    // ลองทดสอบค่า Alpha ตั้งแต่ 0.1 ถึง 0.9
+    for ($a = 0.1; $a <= 0.9; $a += 0.1) {
+        // ใช้ฟังก์ชัน calculateMAD ที่คุณมีอยู่แล้วในการทดสอบ
+        $currentMAD = calculateMAD($data, 'ES', 0, 0, 0, $a, $n_days);
+        
+        if ($currentMAD < $minMAD && $currentMAD > 0) {
+            $minMAD = $currentMAD;
+            $bestAlpha = $a;
+        }
+    }
+    return $bestAlpha;
+}
+//การเรียกใช้ค่า Alpha สำหรับ ES
+if ($method == 'ES') {
+    // ถ้า User กรอกมาให้ใช้ค่านั้น แต่ถ้าไม่ได้กรอก (หรือเปิดหน้าแรก) ให้ระบบหาให้เอง
+    if (isset($_GET['alpha']) && $_GET['alpha'] !== "") {
+        $alpha = (float)$_GET['alpha'];
+    } else {
+        $alpha = getBestAlpha($visitors, $n_days);
+    }
+} else {
+    $alpha = 0.9; // ค่า default สำหรับวิธีอื่น
+}
 
 // --- ฟังก์ชันพยากรณ์แบบต่างๆ ---
-
 // 1. Simple Average (SA)
 function getSA($data) {
     $count = count($data);
@@ -151,7 +177,8 @@ function calculateMAD($data, $method, $w1, $w2, $w3, $alpha, $n_days) {
     return count($errors) > 0 ? array_sum($errors) / count($errors) : 0;
 }
 
-// คำนวณผลลัพธ์หลัก
+// --- คำนวณผลลัพธ์หลัก ---
+// เมื่อตัวแปร $alpha ถูกกำหนดไว้ด้านบนแล้ว ฟังก์ชันเหล่านี้จะทำงานได้โดยไม่ Error
 $madValue = calculateMAD($visitors, $method, $w1, $w2, $w3, $alpha, $n_days);
 $nextForecasts = forecastFuture($visitors, $method, $forecastDays, $w1, $w2, $w3, $alpha, $n_days);
 $tomorrowForecast = $nextForecasts[0];
@@ -227,7 +254,9 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
             <?php endif; ?>
 
             <?php if($method == 'ES'): ?>
-                <div class="col-md-2">Alpha: <input type="number" name="alpha" step="0.1" min="0" max="1" value="<?= $alpha ?>" class="form-control"></div>
+                <div class="col-md-2">
+                    <label class="form-label">Alpha ปัจจุบัน: <?= $alpha ?></label>
+                </div>
             <?php endif; ?>
 
             <div class="col-md-2">
@@ -271,7 +300,7 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
                 <h5 class="fw-bold mb-3">กราฟแนวโน้มและการพยากรณ์ (<?= $method ?>)</h5>
                 <canvas id="visitorChart"></canvas>
                 <div class="image-container mt-4 text-center">
-                <img src="angry_bird.png" alt="image" class="img-fluid rounded shadow-sm" style="max-height: 250px;">
+                <img src="corn-dog-cat.gif" alt="image" style="max-height: 250px;">
                 <p class="text-muted mt-2 small">* ภาพประกอบเพื่อการวิเคราะห์เชิงกลยุทธ์</p>
             </div>
             </div>
@@ -306,7 +335,7 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
             </div>
 
             <div class="card shadow-sm border-0">
-                <div class="card-header bg-primary text-white fw-bold py-2">วิเคราะห์แนวโน้มสัดส่วน</div>
+                <div class="card-header bg-dark text-white fw-bold py-2">วิเคราะห์แนวโน้มสัดส่วน</div>
                 <div class="card-body bg-light">
                     <div class="row g-2 align-items-end mb-3">
                         <div class="col-8">
