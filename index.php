@@ -270,11 +270,14 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
             <div class="card shadow-sm p-3 border-0 h-100">
                 <h5 class="fw-bold mb-3">กราฟแนวโน้มและการพยากรณ์ (<?= $method ?>)</h5>
                 <canvas id="visitorChart"></canvas>
+                <div class="image-container mt-4 text-center">
+                <img src="angry_bird.png" alt="image" class="img-fluid rounded shadow-sm" style="max-height: 250px;">
+                <p class="text-muted mt-2 small">* ภาพประกอบเพื่อการวิเคราะห์เชิงกลยุทธ์</p>
+            </div>
             </div>
         </div>
-
         <div class="col-lg-4 mb-4">
-            <div class="card shadow-sm border-0 h-100">
+            <div class="card shadow-sm border-0 mb-4">
                 <div class="card-header bg-dark text-white fw-bold">สัดส่วนพยากรณ์รายกลุ่ม (วันถัดไป)</div>
                 <div class="card-body p-0">
                     <table class="table table-hover table-custom mb-0">
@@ -301,10 +304,50 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
                     </table>
                 </div>
             </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white fw-bold py-2">วิเคราะห์แนวโน้มสัดส่วน</div>
+                <div class="card-body bg-light">
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-8">
+                            <label class="form-label small fw-bold">ระบุจำนวนวันวิเคราะห์</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" id="a_days_input" value="7" class="form-control" min="1">
+                                <span class="input-group-text">วัน</span>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <button type="button" onclick="updateTrends()" class="btn btn-primary btn-sm w-100 fw-bold">ตกลง</button>
+                        </div>
+                    </div>
+
+                    <div id="trends_container" class="row g-2">
+                        </div>
+                </div>
+            </div>
         </div>
-    </div>
+        </div>
     <?php include 'overall_graph.php'; ?>
 </div>
+    </div>                       
+<script>
+// ฟังก์ชันโหลดข้อมูลแบบ AJAX
+function updateTrends() {
+    const days = document.getElementById('a_days_input').value;
+    const container = document.getElementById('trends_container');
+    
+    container.innerHTML = '<div class="col-12 text-center small text-muted">กำลังคำนวณ...</div>';
+
+    fetch('get_trends.php?a_days=' + days)
+        .then(response => response.text())
+        .then(html => {
+            container.innerHTML = html || '<div class="col-12 text-center small text-muted">ไม่พบข้อมูล</div>';
+        });
+}
+
+// สั่งให้โหลดครั้งแรกตอนเปิดหน้าเว็บ
+document.addEventListener('DOMContentLoaded', updateTrends);
+</script>
 
 <script>
 const ctx = document.getElementById('visitorChart').getContext('2d');
