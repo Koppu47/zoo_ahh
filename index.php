@@ -19,10 +19,23 @@ if (isset($result['category'])) {
     }
     // เรียงวันที่ให้ถูกต้อง
     ksort($dailyTotals);
-
-    // ส่งค่าไปให้ตัวแปรเดิมของระบบพยากรณ์
-    $visitors = array_values($dailyTotals); // ดึงค่า y รวม
-    $dates = array_keys($dailyTotals);     // ดึงค่า x (วันที่)
+    // --- ส่วนเติมช่องว่างวันที่ (Data Gap Filling) ---
+    if (!empty($dailyTotals)) {
+        $minDate = min(array_keys($dailyTotals));
+        $maxDate = max(array_keys($dailyTotals));
+        $current = strtotime($minDate);
+        $last = strtotime($maxDate);
+        
+        $cleanTotals = [];
+        while ($current <= $last) {
+            $dateStr = date('Y-m-d', $current);
+            // ถ้าวันนั้นไม่มีข้อมูลใน JSON ให้เติมเป็น 0
+            $cleanTotals[$dateStr] = isset($dailyTotals[$dateStr]) ? $dailyTotals[$dateStr] : 0;
+            $current = strtotime("+1 day", $current);
+        }
+        $visitors = array_values($cleanTotals);
+        $dates = array_keys($cleanTotals);
+    }
 } else {
     die("Error: ไม่พบข้อมูล category ใน data.JSON");
 }
@@ -189,14 +202,47 @@ function forecastFuture($data, $method, $days, $w1, $w2, $w3, $alpha, $n_days) {
     return $results;
 }
 
-// --- คำนวณ Error (MAD: Mean Absolute Deviation) ---
+// --- คำนวณ Error (MAD: Mean Absolute Deviation) แบบสะสมตั้งแต่ต้นข้อมูล ---
 function calculateMAD($data, $method, $w1, $w2, $w3, $alpha, $n_days) {
     $errors = [];
     $n = count($data);
-    // ตรวจสอบย้อนหลัง 5 จุดล่าสุดเพื่อหาความแม่นยำ
-    for ($i = $n - 5; $i < $n; $i++) {
-        if ($i < 3) continue;
+
+    // กำหนดจุดเริ่มต้น (Start Index)
+    // สำหรับ MA หรือ WMA ต้องมีข้อมูลในอดีตอย่างน้อย $n_days หรือ 3 วันก่อนหน้าถึงจะเริ่มพยากรณ์จุดแรกได้
+    $startIndex = ($method == 'WMA') ? 3 : (($method == 'MA') ? $n_days : 1);
+
+    // วนลูปตั้งแต่จุดที่เริ่มพยากรณ์ได้ ไปจนถึงข้อมูลตัวสุดท้าย ($n)
+    for ($i = $startIndex; $i < $n; $i++) {
+        $actual = $data[$i]; // ค่าจริง ณ วันที่ i
+        
+        // ดึงข้อมูลย้อนหลังทั้งหมดตั้งแต่จุดแรก จนถึงก่อนวันที่จะพยากรณ์ ($i)
+        $history = array_slice($data, 0, $i);
+        
+        $pred = 0;
+        switch($method) {
+            case 'SA': $pred = getSA($history); break;
+            case 'MA': $pred = getMA($history, $n_days); break;
+            case 'ES': $pred = getES($history, $alpha); break;
+            default:   $pred = getWMA($history, $w1, $w2, $w3); break;
+        }
+
+        // เก็บค่าผลต่างสัมบูรณ์ (Absolute Error)
+        $errors[] = abs($actual - $pred);
+    }
+
+    // คืนค่าเฉลี่ยของความคลาดเคลื่อนทั้งหมด (Mean)
+    return count($errors) > 0 ? array_sum($errors) / count($errors) : 0;
+}
+// ฟังก์ชันนี้จะคำนวณหาเปอร์เซ็นต์ความผิดพลาดเฉลี่ย (MAPE: Mean Absolute Percentage Error)
+function calculateMAPE($data, $method, $w1, $w2, $w3, $alpha, $n_days) {
+    $errors_pct = [];
+    $n = count($data);
+    $startIndex = ($method == 'WMA') ? 3 : (($method == 'MA') ? $n_days : 1);
+
+    for ($i = $startIndex; $i < $n; $i++) {
         $actual = $data[$i];
+        if ($actual <= 0) continue; // ข้ามกรณีค่าจริงเป็น 0 เพื่อไม่ให้ Error
+
         $history = array_slice($data, 0, $i);
         $pred = 0;
         switch($method) {
@@ -205,9 +251,35 @@ function calculateMAD($data, $method, $w1, $w2, $w3, $alpha, $n_days) {
             case 'ES': $pred = getES($history, $alpha); break;
             default:   $pred = getWMA($history, $w1, $w2, $w3); break;
         }
-        $errors[] = abs($actual - $pred);
+        $errors_pct[] = (abs($actual - $pred) / $actual) * 100;
     }
-    return count($errors) > 0 ? array_sum($errors) / count($errors) : 0;
+    return count($errors_pct) > 0 ? array_sum($errors_pct) / count($errors_pct) : 0;
+}
+
+// --- 1. นิยามวิธีพยากรณ์ทั้งหมดที่มี ---
+$availableMethods = ['SA', 'MA', 'WMA', 'ES'];
+$bestMethod = 'SA';
+$minMAD = INF;
+$allMADs = []; // เก็บไว้โชว์เปรียบเทียบ
+
+// --- 2. วนลูปหา Model ที่ค่า MAD ต่ำที่สุด ---
+foreach ($availableMethods as $m) {
+    // ใช้ Parameter กลางในการทดสอบ
+    $currentMAD = calculateMAD($visitors, $m, $w1, $w2, $w3, $alpha, $n_days);
+    $allMADs[$m] = $currentMAD;
+
+    if ($currentMAD < $minMAD && $currentMAD > 0) {
+        $minMAD = $currentMAD;
+        $bestMethod = $m;
+    }
+}
+
+// --- 3. กำหนดค่า Method หลัก ---
+// ถ้า User ไม่ได้กดเลือกเองจาก URL ให้ใช้ค่า Best Method ที่ระบบหาได้
+if (!isset($_GET['method']) || $_GET['method'] == "") {
+    $method = $bestMethod;
+} else {
+    $method = $_GET['method'];
 }
 
 // --- คำนวณผลลัพธ์หลัก ---
@@ -217,7 +289,7 @@ $nextForecasts = forecastFuture($visitors, $method, $forecastDays, $w1, $w2, $w3
 $tomorrowForecast = $nextForecasts[0];
 
 // --- เตรียมข้อมูลสำหรับกราฟ ---
-$displayLimit = 15; // แสดงย้อนหลัง 15 วันเพื่อให้เห็นภาพรวม
+$displayLimit = 20; // แสดงย้อนหลัง 15 วันเพื่อให้เห็นภาพรวม
 $limitedVisitors = array_slice($visitors, -$displayLimit);
 $limitedDates = array_slice($dates, -$displayLimit);
 
@@ -249,7 +321,16 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
     </style>
 </head>
 <body>
-
+<div class="alert alert-info border-0 shadow-sm d-flex align-items-center">
+    <div class="flex-grow-1">
+        <strong>💡 ระบบเลือกวิธีที่ดีที่สุดให้คุณ:</strong> 
+        ปัจจุบันใช้โมเดล <span class="badge bg-primary"><?= $method ?></span> 
+        เนื่องจากมีความคลาดเคลื่อน (MAD) ต่ำที่สุดที่ <strong><?= number_format($minMAD, 1) ?></strong>
+    </div>
+    <div class="text-muted small">
+        ความแม่นยำประมาณ <?= number_format(max(0, 100 - calculateMAPE($visitors, $method, $w1, $w2, $w3, $alpha, $n_days)), 1) ?>%
+    </div>
+</div>
 <div class="dashboard-container shadow">
     <h2 class="text-center mb-4 fw-bold text-dark">Zoo Analytics & Multi-Model Forecasting</h2>
 
@@ -304,21 +385,32 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
     </div>
 
     <div class="row g-3 mb-4 text-center">
-        <div class="col-md-4">
-            <div class="card card-stat bg-secondary">
-                <h6>ความแม่นยำ (MAD)</h6>
-                <h3 class="fw-bold"><?= number_format($madValue, 2) ?></h3>
-                <small>ยิ่งน้อยยิ่งแม่นยำ</small>
+        <?php // คำนวณค่าก่อนแสดงผล
+            $mapeValue = calculateMAPE($visitors, $method, $w1, $w2, $w3, $alpha, $n_days);
+            $accuracy = max(0, 100 - $mapeValue); // คำนวณเป็นเปอร์เซ็นต์ความแม่นยำ
+        ?>
+        <div class="col-md-3">
+                <div class="card card-stat bg-secondary">
+                    <h6>ความคลาดเคลื่อน (MAD)</h6>
+                    <h3 class="fw-bold"><?= number_format($madValue, 1) ?></h3>
+                    <small>หน่วย: คน</small>
+                </div>
             </div>
-        </div>
-        <div class="col-md-4">
+            <div class="col-md-3">
+                <div class="card card-stat <?= $accuracy > 80 ? 'bg-success' : 'bg-warning' ?>">
+                    <h6>ความแม่นยำ (Accuracy)</h6>
+                    <h3 class="fw-bold"><?= number_format($accuracy, 1) ?>%</h3>
+                    <small>MAPE: <?= number_format($mapeValue, 1) ?>%</small>
+                </div>
+            </div>
+        <div class="col-md-3">
             <div class="card card-stat bg-success">
                 <h6>พยากรณ์วันพรุ่งนี้ (<?= $method ?>)</h6>
                 <h3 class="fw-bold"><?= number_format($tomorrowForecast, 0) ?> คน</h3>
                 <small>คาดการณ์รายกลุ่มด้านขวา</small>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card card-stat bg-info">
                 <h6>Simple Average (ภาพรวม)</h6>
                 <h3 class="fw-bold"><?= number_format(getSA($visitors), 0) ?> คน</h3>
