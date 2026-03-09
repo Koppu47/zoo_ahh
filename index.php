@@ -78,6 +78,31 @@ if ($method == 'ES') {
     $alpha = 0.9; // ค่า default สำหรับวิธีอื่น
 }
 
+//การเรียกใช้ค่า WMA สำหรับ WMA ที่ดีที่สุด
+function getBestWMAWeights($data, $n_days) {
+    $bestWeights = ['w1' => 0.5, 'w2' => 0.3, 'w3' => 0.2];
+    $minMAD = INF;
+
+    // วนลูปทดสอบค่า w1, w2, w3 ที่รวมกันได้ 1.0 (step ทีละ 0.1)
+    for ($w1 = 0.1; $w1 <= 0.8; $w1 += 0.1) {
+        for ($w2 = 0.1; $w2 <= (1.0 - $w1 - 0.1); $w2 += 0.1) {
+            $w3 = 1.0 - $w1 - $w2;
+            
+            // ป้องกันปัญหาเลขทศนิยมไม่เป๊ะในคอมพิวเตอร์
+            $w3 = round($w3, 1); 
+
+            // ทดสอบหาค่า Error ของชุดน้ำหนักนี้
+            $currentMAD = calculateMAD($data, 'WMA', $w1, $w2, $w3, 0, $n_days);
+
+            if ($currentMAD < $minMAD && $currentMAD > 0) {
+                $minMAD = $currentMAD;
+                $bestWeights = ['w1' => $w1, 'w2' => $w2, 'w3' => $w3];
+            }
+        }
+    }
+    return $bestWeights;
+}
+
 // --- ฟังก์ชันพยากรณ์แบบต่างๆ ---
 // 1. Simple Average (SA)
 function getSA($data) {
@@ -109,7 +134,7 @@ $n = count($data);
     $sum = ($data[$n-1] * $w1) + ($data[$n-2] * $w2) + ($data[$n-3] * $w3);
     return $sum / $total_w; // หารเพื่อ Normalize ให้กลับมาเป็นค่าเฉลี่ยที่ถูกต้อง
 }
-    
+
 
 // 4. Exponential Smoothing (ES)
 function getES($data, $alpha) {
@@ -118,6 +143,14 @@ function getES($data, $alpha) {
         $forecast = ($alpha * $actual) + ((1 - $alpha) * $forecast);
     }
     return $forecast;
+}
+
+//ค่า WMA ที่ดีที่สุดถ้าเลือกวิธี WMA แต่ไม่ได้กรอกน้ำหนักมา
+if ($method == 'WMA' && (!isset($_GET['w1']) || $_GET['w1'] == "")) {
+    $bestW = getBestWMAWeights($visitors, $n_days);
+    $w1 = $bestW['w1'];
+    $w2 = $bestW['w2'];
+    $w3 = $bestW['w3'];
 }
 
 // ฟังก์ชันพยากรณ์ล่วงหน้าแบบยืดหยุ่น (Recursive)
@@ -300,7 +333,7 @@ $forecastDataChart = array_merge(array_fill(0, count($limitedVisitors) - 1, null
                 <h5 class="fw-bold mb-3">กราฟแนวโน้มและการพยากรณ์ (<?= $method ?>)</h5>
                 <canvas id="visitorChart"></canvas>
                 <div class="image-container mt-4 text-center">
-                <img src="corn-dog-cat.gif" alt="image" style="max-height: 250px;">
+                <img src="dog-awesome-balance.gif" alt="image" style="max-height: 250px;">
                 <p class="text-muted mt-2 small">* ภาพประกอบเพื่อการวิเคราะห์เชิงกลยุทธ์</p>
             </div>
             </div>
